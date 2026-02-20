@@ -36,7 +36,7 @@ page = st.sidebar.radio("Navigation", ["Upload Picks", "Market Tracker", "Leader
 if page == "Upload Picks":
     st.title("Upload Picks")
 
-    DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1vQVJih4dl5paSxxHymJkohIassIr7d90t9fVV1vJwaA/"
+    DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1vQVJih4dl5paSxxHymJkohIassIr7d90t9fVV1vJwaA"
 
     SHEET_URL_KEY = "google_sheet_url"
     if SHEET_URL_KEY not in st.session_state:
