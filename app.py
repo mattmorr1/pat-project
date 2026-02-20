@@ -35,41 +35,107 @@ page = st.sidebar.radio("Navigation", ["Upload Picks", "Market Tracker", "Leader
 # ============================= PAGE 1 =====================================
 if page == "Upload Picks":
     st.title("Upload Picks")
-    st.markdown("Upload an `.xlsx` file with columns: **timestamp, name, pick_1, pick_2, pick_3, pick_4, pick_5**")
 
-    uploaded = st.file_uploader("Choose .xlsx file", type=["xlsx"])
+    DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1vQVJih4dl5paSxxHymJkohIassIr7d90t9fVV1vJwaA/"
 
-    if uploaded is not None:
-        raw = pd.read_excel(uploaded, engine="openpyxl")
-        raw.columns = [c.strip().lower().replace(" ", "_").rstrip(":_") for c in raw.columns]
+    SHEET_URL_KEY = "google_sheet_url"
+    if SHEET_URL_KEY not in st.session_state:
+        st.session_state[SHEET_URL_KEY] = DEFAULT_SHEET_URL
 
-        name_col = next((c for c in raw.columns if "name" in c), None)
-        if name_col and name_col != "name":
-            raw = raw.rename(columns={name_col: "name"})
+    def _sheet_url_to_csv(url: str) -> str:
+        url = url.strip()
+        if "/edit" in url:
+            url = url.split("/edit")[0]
+        if url.endswith("/"):
+            url = url[:-1]
+        return url + "/export?format=csv"
 
-        st.subheader("Preview")
-        st.dataframe(raw, use_container_width=True)
+    def _load_sheet(url: str) -> pd.DataFrame | None:
+        try:
+            csv_url = _sheet_url_to_csv(url)
+            raw = pd.read_csv(csv_url)
+            raw.columns = [c.strip().lower().replace(" ", "_").rstrip(":_") for c in raw.columns]
+            name_col = next((c for c in raw.columns if "name" in c), None)
+            if name_col and name_col != "name":
+                raw = raw.rename(columns={name_col: "name"})
+            return raw
+        except Exception as e:
+            st.error(f"Failed to fetch sheet: {e}")
+            return None
 
-        pick_cols = [c for c in raw.columns if c.startswith("pick")]
-        errors = []
-        for idx, row in raw.iterrows():
-            for col in pick_cols:
-                pick = str(row[col]).strip()
-                cat, _, _ = db.validate_pick(pick)
-                if cat is None:
-                    errors.append(f"Row {idx + 1}, {col}: '{pick}' not a valid option")
+    tab_sheet, tab_file = st.tabs(["Google Sheet", "Upload .xlsx"])
 
-        if errors:
-            st.error("Validation errors:")
-            for e in errors:
-                st.write(f"- {e}")
-        else:
-            st.success("All picks validated.")
-            if st.button("Lock In Picks"):
-                _ensure_ticker_map()
-                db.save_picks(raw, st.session_state.title_to_ticker)
-                st.toast("Picks locked in.")
-                st.rerun()
+    with tab_sheet:
+        st.markdown("Paste a Google Sheet URL. The sheet must be shared as **'Anyone with the link can view'**.")
+        url = st.text_input("Google Sheet URL", value=st.session_state[SHEET_URL_KEY], placeholder="https://docs.google.com/spreadsheets/d/...")
+
+        if url:
+            st.session_state[SHEET_URL_KEY] = url
+            raw = _load_sheet(url)
+            if raw is not None:
+                st.subheader("Preview")
+                st.dataframe(raw, use_container_width=True)
+
+                pick_cols = [c for c in raw.columns if "pick" in c]
+                errors = []
+                for idx, row in raw.iterrows():
+                    for col in pick_cols:
+                        val = str(row[col]).strip()
+                        if not val or val.lower() == "nan":
+                            continue
+                        cat, _, _ = db.validate_pick(val)
+                        if cat is None:
+                            errors.append(f"Row {idx + 1}, {col}: '{val}' not a valid option")
+
+                if errors:
+                    st.error("Validation errors:")
+                    for e in errors:
+                        st.write(f"- {e}")
+                else:
+                    st.success("All picks validated.")
+                    if st.button("Sync & Lock In", key="lock_sheet"):
+                        _ensure_ticker_map()
+                        db.clear_picks()
+                        db.save_picks(raw, st.session_state.title_to_ticker)
+                        st.toast("Picks synced from Google Sheet.")
+                        st.rerun()
+
+    with tab_file:
+        st.markdown("Or upload an `.xlsx` file with columns: **timestamp, name, pick_1, pick_2, pick_3, pick_4, pick_5**")
+        uploaded = st.file_uploader("Choose .xlsx file", type=["xlsx"])
+
+        if uploaded is not None:
+            raw = pd.read_excel(uploaded, engine="openpyxl")
+            raw.columns = [c.strip().lower().replace(" ", "_").rstrip(":_") for c in raw.columns]
+            name_col = next((c for c in raw.columns if "name" in c), None)
+            if name_col and name_col != "name":
+                raw = raw.rename(columns={name_col: "name"})
+
+            st.subheader("Preview")
+            st.dataframe(raw, use_container_width=True)
+
+            pick_cols = [c for c in raw.columns if "pick" in c]
+            errors = []
+            for idx, row in raw.iterrows():
+                for col in pick_cols:
+                    val = str(row[col]).strip()
+                    if not val or val.lower() == "nan":
+                        continue
+                    cat, _, _ = db.validate_pick(val)
+                    if cat is None:
+                        errors.append(f"Row {idx + 1}, {col}: '{val}' not a valid option")
+
+            if errors:
+                st.error("Validation errors:")
+                for e in errors:
+                    st.write(f"- {e}")
+            else:
+                st.success("All picks validated.")
+                if st.button("Lock In Picks", key="lock_file"):
+                    _ensure_ticker_map()
+                    db.save_picks(raw, st.session_state.title_to_ticker)
+                    st.toast("Picks locked in.")
+                    st.rerun()
 
     st.divider()
     st.subheader("Locked Picks")
