@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+picks.db
+picks.db-wal
+picks.db-shm
+.env
