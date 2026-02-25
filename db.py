@@ -270,17 +270,25 @@ def backfill_tickers(title_to_ticker: dict[str, dict[str, str]]):
     conn.close()
 
 
+def _resolved_yes_expr():
+    return "(COALESCE(ms.result, '') = 'yes' OR (COALESCE(ms.result, '') = '' AND ms.yes_price >= 0.99))"
+
+def _resolved_no_expr():
+    return "(COALESCE(ms.result, '') = 'no' OR (COALESCE(ms.result, '') = '' AND ms.yes_price <= 0.01))"
+
+
 def calculate_scores() -> pd.DataFrame:
+    yes = _resolved_yes_expr()
     conn = _conn()
-    df = pd.read_sql_query("""
+    df = pd.read_sql_query(f"""
         SELECT
             p.name,
-            SUM(CASE WHEN COALESCE(ms.result, '') = 'yes' THEN p.points ELSE 0 END) as total_points,
-            SUM(CASE WHEN COALESCE(ms.result, '') = 'yes' THEN 1 ELSE 0 END) as correct_picks,
+            SUM(CASE WHEN {yes} THEN p.points ELSE 0 END) as total_points,
+            SUM(CASE WHEN {yes} THEN 1 ELSE 0 END) as correct_picks,
             COUNT(*) as total_picks
         FROM picks p
         LEFT JOIN (
-            SELECT ticker, title, result, status
+            SELECT ticker, title, result, status, yes_price
             FROM market_snapshots
             WHERE id IN (SELECT MAX(id) FROM market_snapshots GROUP BY ticker)
         ) ms ON (p.market_ticker != '' AND p.market_ticker = ms.ticker)
@@ -317,11 +325,17 @@ def get_leaderboard() -> pd.DataFrame:
 
 
 def get_pick_details() -> pd.DataFrame:
+    yes = _resolved_yes_expr()
+    no = _resolved_no_expr()
     conn = _conn()
-    df = pd.read_sql_query("""
+    df = pd.read_sql_query(f"""
         SELECT
             p.name, p.pick, p.points, p.market_ticker, p.event_ticker,
-            COALESCE(ms.result, '') as result,
+            CASE
+                WHEN {yes} THEN 'yes'
+                WHEN {no} THEN 'no'
+                ELSE COALESCE(ms.result, '')
+            END as result,
             COALESCE(ms.status, '') as status,
             COALESCE(ms.yes_price, 0) as yes_price
         FROM picks p
